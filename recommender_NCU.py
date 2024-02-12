@@ -1,17 +1,21 @@
 import inspect
 import numpy as np
 import pandas as pd
+import os
 import time
 import warnings
 
 from colorama import Fore, init
 from rich import console
-from scipy import stats
 from scipy.sparse import csr_matrix
 from sklearn.cluster import DBSCAN, KMeans
-from sklearn.metrics import silhouette_samples, silhouette_score
+from sklearn.metrics import silhouette_score
 from sklearn.metrics.pairwise import pairwise_distances
 from sklearn.preprocessing import StandardScaler
+
+# clear the output
+os.system('cls') # for windows
+os.system('clear') # for linux/mac
 
 startTime = time.time()
 
@@ -49,109 +53,96 @@ def lineno():
     return frame.f_back.f_lineno
 
 
-def kmeans_elbow(data, low:int = 1, high:int = 10):
-    if high <= 1:
-        return 1
+def item_item_collaborative_filtering(books_ratings, isbn, n: int = 20, cluster_type: str = "kmeans"):
+    startTime_cpu = time.process_time() # CPU time
 
-    _elbow  = 1
-    _value  = 0
-    _last   = 0
-    _k      = range(low, high)
-    _sum_of_squared_distances = []
-
-    for num_clusters in _k:
-        _kmeans = KMeans(init="k-means++", n_clusters=num_clusters, n_init=10, max_iter=300, random_state=42).fit(data)
-        _sum_of_squared_distances.append(_kmeans.inertia_)
-
-    for i in range(1, len(_sum_of_squared_distances)):
-        _value = _sum_of_squared_distances[i - 1] - _sum_of_squared_distances[i]
-        if _value > _last:
-            _elbow += 1 
-        _last = _value
-
-    return _elbow
-
-
-def get_recommendations(item:str, matrix:pd.DataFrame=None, n:int=10, result_type:str='similar'):
     _result = pd.DataFrame()
 
-    if matrix is None:
-        raise ValueError("matrix cannot be None")
+    # Get the cluster type
+    _cluster_type = "kmeans_cluster" if cluster_type.lower() == "kmeans" else "dbscan_cluster"
+    print(Fore.LIGHTGREEN_EX + f">>> >>>>> line {lineno()}: cluster type: {_cluster_type} >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
 
-    if item not in matrix.index:
-        raise ValueError(f"{item} does not exist in matrix")
+    # keep a copy of the original dataframe
+    books_ratings_ori = books_ratings.copy()
+    print(Fore.LIGHTGREEN_EX + f">>> >>>>> line {lineno()}: copy of the original dataframe created >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
 
-    if result_type.lower() == 'similar':
-        _result = matrix.loc[item].sort_values(ascending=True)[1:n+1].to_frame()
-        _result.columns = ['similarity_score']
-        _result['rank'] = _result['similarity_score'].rank(ascending=True)
+    # Filter the books_ratings dataframe to include only the specified ISBN
+    books_ratings = books_ratings[books_ratings["isbn"] == isbn]
+    print(Fore.LIGHTGREEN_EX + f">>> >>>>> line {lineno()}: books_ratings filtered to include only the specified ISBN >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
+ 
+    # Get the MAX cluster label of the specified book
+    max_rating_cluster = books_ratings.loc[books_ratings["rating"].idxmax(), _cluster_type]
+    print(Fore.LIGHTGREEN_EX + f">>> >>>>> line {lineno()}: max cluster label of the specified book >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
+ 
+    # Filter the books_ratings_ori dataframe to include only the books in the same Max cluster
+    cluster_books = books_ratings_ori[books_ratings_ori[_cluster_type] == max_rating_cluster]
+    print(Fore.LIGHTGREEN_EX + f">>> >>>>> line {lineno()}: books_ratings_ori filtered to include only the books in the same Max cluster >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
+ 
+    # Create a Pivot Matrix: Users as rows and Books as columns
+    cluster_books_pivot = cluster_books.pivot(index="user_id", columns="isbn", values="rating").fillna(0)
+    print(Fore.LIGHTGREEN_EX + f">>> >>>>> line {lineno()}: pivot matrix created >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
 
-    elif result_type.lower() == 'dissimilar':
-        # _result = matrix.loc[item].sort_values(ascending=False)[-(n+1):].to_frame()
-        # _result.columns = ['dissimilarity_score']
-        # _result['rank'] = _result['dissimilarity_score'].rank(ascending=False)
-        # _result.drop(_result.index[-1], inplace=True)
+    # Create a Sparse Matrix
+    #   if most of the elements of the matrix have 0 value, then it is called a sparse matrix
+    #   Representing a sparse matrix by a 2D array leads to wastage of lots of memory as zeroes in the matrix are of no use in most 
+    #   of the cases. So, instead of storing zeroes with non-zero elements, we only store non-zero elements. This means storing 
+    # non-zero elements with triples- (Row, Column, value)
+    cluster_book_matrix = csr_matrix(cluster_books_pivot.values)
+    print(Fore.LIGHTGREEN_EX + f">>> >>>>> line {lineno()}: sparse matrix created >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
 
-        _result = 1 - matrix.loc[item].sort_values(ascending=False)[-(n+1):].to_frame()
-        _result.columns = ['dissimilarity_score']
-        _result['rank'] = _result['dissimilarity_score'].rank(ascending=True)
-        _result.drop(_result.index[-1], inplace=True)
+    item_similarity = pairwise_distances(cluster_book_matrix.T, metric="cosine")
+    print(Fore.LIGHTGREEN_EX + f">>> >>>>> line {lineno()}: item similarity computed >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
+
+    item_similarity_df = pd.DataFrame(item_similarity, index=cluster_books_pivot.columns, columns=cluster_books_pivot.columns)
+    print(Fore.LIGHTGREEN_EX + f">>> >>>>> line {lineno()}: item similarity dataframe created >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
+
+    _result = item_similarity_df.loc[isbn].sort_values(ascending=True)[1:n+1].to_frame()
+    print(Fore.LIGHTGREEN_EX + f">>> >>>>> line {lineno()}: top similar books computed >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
+
+    _result.columns = ['similarity_score']
+    print(Fore.LIGHTGREEN_EX + f">>> >>>>> line {lineno()}: column name changed to 'similarity_score' >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
+
+    _result['rank'] = _result['similarity_score'].rank(ascending=True)
+    print(Fore.LIGHTGREEN_EX + f">>> >>>>> line {lineno()}: rank computed >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
 
     return _result
 
 
-def kmeans_confidence(data:pd.DataFrame, k:int, confidence=CONFIDENCE_LEVEL):
-    """Calculates the confidence interval for a k-means model
+def recommend_similar_books(books_ratings, isbn, n: int = 20, cluster_type: str = "kmeans"):
+    startTime_cpu = time.process_time() # CPU time
 
-    Args:
-        data (pd.DataFrame): The data to be clustered
-        k (int): The number of clusters
-        confidence (float, optional): The desired confidence level. Defaults to 0.95
+    book = books_ratings[books_ratings['isbn'] == isbn]
+    print(Fore.LIGHTGREEN_EX + f">>> >>>>> line {lineno()}: book found >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
 
-    Returns:
-        A tuple of two floats, the lower and upper bounds of the confidence interval
-    """
+    _cluster_type = "kmeans_cluster" if cluster_type.lower() == "kmeans" else "dbscan_cluster"
+    print(Fore.LIGHTGREEN_EX + f">>> >>>>> line {lineno()}: cluster type: {_cluster_type} >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
 
-    # Fit the k-means model
-    model = KMeans(n_clusters=k).fit(data)
+    if book.empty:
+        print(Fore.RED + f">>> >>>>> line {lineno()}: book with ISBN {isbn} not found >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
+        return None
+    else:
+        book_cluster = book[_cluster_type].values[0]
+        print(Fore.LIGHTGREEN_EX + f">>> >>>>> line {lineno()}: book cluster found >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
 
-    # Calculate the inertia
-    inertia = model.inertia_
+        similar_books = books_ratings[books_ratings[_cluster_type] == book_cluster]
+        print(Fore.LIGHTGREEN_EX + f">>> >>>>> line {lineno()}: similar books found >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
 
-    # Calculate the degrees of freedom
-    degree_of_freedom = k - 1
+        similar_books = similar_books[similar_books["isbn"] != isbn]
+        print(Fore.LIGHTGREEN_EX + f">>> >>>>> line {lineno()}: similar books filtered >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
 
-    # Calculate the critical value
-    t_critical = stats.t.ppf((1 - confidence) / 2, degree_of_freedom)
+        similar_books = similar_books.sort_values(by="rating", ascending=False).head(n)
+        print(Fore.LIGHTGREEN_EX + f">>> >>>>> line {lineno()}: top similar books found >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
 
-    # Calculate the confidence interval
-    lower_bound = inertia - t_critical * np.sqrt(2 * inertia / degree_of_freedom)
-    upper_bound = inertia + t_critical * np.sqrt(2 * inertia / degree_of_freedom)
+        similar_books.drop_duplicates(inplace=True)
+        print(Fore.LIGHTGREEN_EX + f">>> >>>>> line {lineno()}: duplicates removed >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
 
-    return lower_bound, upper_bound
+    return similar_books[["isbn", "title", _cluster_type, "rating", "rating_normalized"]]
 
 
-def calculate_rmse(set1, set2):
-    # Convert the sets to NumPy arrays for ease of calculation
-    set1 = np.array(set1)
-    set2 = np.array(set2)
-
-    # Calculate the squared differences
-    squared_diff = (set1 - set2) ** 2
-
-    # Calculate the mean of squared differences
-    mean_squared_diff = np.mean(squared_diff)
-
-    # Calculate the square root to get the RMSE
-    rmse = np.sqrt(mean_squared_diff)
-
-    return rmse
-# ### [END] METHODS ###
-
-# Load data
+# ### LOAD DATA ###
 startTime_cpu = time.process_time() # CPU time
 ratings = pd.read_csv(r"data/bx_ratings.csv", sep=";", on_bad_lines="skip", encoding="latin-1", usecols=["User-ID", "ISBN", "Book-Rating"], dtype={"User-ID": "int", "ISBN": "str", "Book-Rating": "int"}, nrows=50000, )
-books = pd.read_csv(r"data/bx_books.csv", sep=";", on_bad_lines="skip", encoding="latin-1", usecols=["ISBN", "Book-Title", "Book-Author", "Year-Of-Publication", "Publisher"], dtype={"ISBN": "str", "Book-Title": "str", "Book-Author": "str", "Year-Of-Publication": "str", "Publisher": "str"}, nrows=50000, )
+books = pd.read_csv(r"data/bx_books.csv", sep    =";", on_bad_lines="skip", encoding="latin-1", usecols=["ISBN", "Book-Title", "Book-Author", "Year-Of-Publication", "Publisher"], dtype={"ISBN": "str", "Book-Title": "str", "Book-Author": "str", "Year-Of-Publication": "str", "Publisher": "str"}, nrows=50000, )
 users = pd.read_csv(r"data/bx_users.csv", sep=";", on_bad_lines="skip", encoding="latin-1", usecols=["User-ID", "Location", "Age"], dtype={"User-ID": "int", "Location": "str", "Age": "str"}, nrows=50000, )
 print(Fore.CYAN + f">>> line {lineno()}: data loaded >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
 
@@ -162,6 +153,20 @@ ratings.columns = ["user_id", "isbn", "rating", ]
 books.columns = ["isbn", "title", "author", "year", "publisher", ]
 users.columns = ["user_id", "location", "age", ]
 print(Fore.CYAN + f">>> line {lineno()}: primary columns renamed >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
+
+# Get the count of times a book has been rated
+startTime_cpu = time.process_time() # CPU time
+ratings_count = ratings["isbn"].value_counts()
+print(Fore.CYAN + f">>> line {lineno()}: count of times a book has been rated >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
+
+# Add the count of times a book has been rated to the books dataframe
+startTime_cpu = time.process_time() # CPU time
+books = books.merge(ratings_count, left_on="isbn", right_index=True, how="left")
+books.rename(columns={"isbn": "isbn", "title": "title", "author": "author", "year": "year", "publisher": "publisher", "count": "rating_count", }, inplace=True)
+print(Fore.CYAN + f">>> line {lineno()}: count of times a book has been rated added to the books dataframe >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
+
+# console.print(books["034545104X" == books["isbn"]])
+# console.print(books.head(5))
 
 # Remove duplicates and books with missing values
 startTime_cpu = time.process_time() # CPU time
@@ -204,15 +209,6 @@ bad_age_users = users[users["age"].isin(list(filter(lambda x : (x < 5 or x > 100
 users.drop(bad_age_users, inplace=True)
 print(Fore.CYAN + f">>> line {lineno()}: ages less than 5 and greater than 100 removed >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
 
-# Filter out users and books with low ratings
-startTime_cpu = time.process_time() # CPU time
-ratings_count = ratings.groupby(["isbn"]).count()
-popular_books = ratings_count[ratings_count["rating"] >= 10].index
-ratings = ratings[ratings["isbn"].isin(popular_books)]
-ratings = ratings[ratings["user_id"].isin(users["user_id"])]
-print(Fore.CYAN + f">>> line {lineno()}: users and books with low ratings filtered out >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
-# ### [END] DATA CLEANING ###
-
 # Merge Books and Ratings
 startTime_cpu = time.process_time() # CPU time
 books_ratings = pd.merge(left=books, right=ratings, on="isbn")
@@ -220,171 +216,140 @@ print(Fore.CYAN + f">>> line {lineno()}: books and ratings merged >>> {(time.pro
 
 # Keeping the following columns: isbn, title, user_id, rating
 startTime_cpu = time.process_time() # CPU time
-books_ratings = books_ratings[["isbn", "title", "user_id", "rating"]]
+books_ratings = books_ratings[["isbn", "title", "user_id", "rating", "rating_count"]]
 print(Fore.CYAN + f">>> line {lineno()}: keeping the following columns: isbn, title, user_id, rating >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
+# ### [END] DATA CLEANING ###
 
-# Create a Pivot Matrix: Users as rows and Books as columns
-startTime_cpu = time.process_time() # CPU time
-books_pivot = books_ratings.pivot(index="user_id", columns="isbn", values="rating").fillna(0)
-print(Fore.CYAN + f">>> line {lineno()}: pivot matrix created >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
-
-# Create a Sparse Matrix
-# A CSR is a compressed sparse row or compressed row storage matrix. It’s just a fancy way of storing only the non-zero entries in a matrix
-startTime_cpu = time.process_time() # CPU time
-book_matrix = csr_matrix(books_pivot.values)
-print(Fore.CYAN + f">>> line {lineno()}: sparse matrix created >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
-
-# Normalizing data for clustering - normalizing over the standard deviation
+# Normalizing data for clustering - normalizing over the standard deviation: 
+#   scale the data so that all features have a mean of 0 and a standard deviation of 1
+# In Python, it is important to normalize data for clustering before applying a clustering algorithm because it helps to ensure that all 
+#   features are on an equal scale. This is important because clustering algorithms work by calculating the distance between data points, 
+#   and if one feature has a much larger range of values than another, it will have a greater impact on the distance calculation. This can 
+#   lead to the algorithm clustering the data based on that one feature, even if it is not the most important feature.
 startTime_cpu = time.process_time() # CPU time
 book_ratings_norm = StandardScaler(with_mean=False).fit_transform(books_ratings[['rating']])
+books_ratings['rating_normalized'] = book_ratings_norm
+
+book_ratings_count_norm = StandardScaler(with_mean=False).fit_transform(books_ratings[['rating_count']])
+books_ratings['rating_count_normalized'] = book_ratings_count_norm
+
+# console.print(books_ratings.head(5))
+
 print(Fore.CYAN + f">>> line {lineno()}: normalizing data for clustering: completed >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
 
-# Compute item-item similarity (using cosine similarity)
-startTime_cpu = time.process_time() # CPU time
-item_similarity = pairwise_distances(book_matrix.T, metric="cosine") # Transpose to get item-item similarity
-item_similarity_df = pd.DataFrame(item_similarity, index=books_pivot.columns, columns=books_pivot.columns)
-print(Fore.CYAN + f">>> line {lineno()}: item-item similarity computed >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
-
-# Normalize similarity values
-startTime_cpu = time.process_time() # CPU time
-item_similarity_norm = StandardScaler(with_mean=False).fit_transform(item_similarity)
-item_similarity_norm_df = pd.DataFrame(item_similarity_norm, index=books_pivot.columns, columns=books_pivot.columns)
-print(Fore.CYAN + f">>> line {lineno()}: similarity values normalized >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
-
-# Compute item-item dissimilarity (using cosine dissimilarity)
-startTime_cpu = time.process_time() # CPU time
-item_dissimilarity = 1 - pairwise_distances(book_matrix.T, metric="cosine")
-item_dissimilarity_df = pd.DataFrame(item_dissimilarity, index=books_pivot.columns, columns=books_pivot.columns)
-print(Fore.CYAN + f">>> line {lineno()}: item-item dissimilarity computed >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
-
-# Normalize dissimilarity values
-startTime_cpu = time.process_time() # CPU time
-item_dissimilarity_norm = StandardScaler(with_mean=False).fit_transform(item_dissimilarity)
-item_dissimilarity_norm_df = pd.DataFrame(item_dissimilarity_norm, index=books_pivot.columns, columns=books_pivot.columns)
-print(Fore.CYAN + f">>> line {lineno()}: dissimilarity values normalized >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
-
+# ### [START] CLUSTERS ###
 # ### [START] K-Means Clustering
+
+# ### [END] K-Means Clustering
+# K-Means wants numerical columns, with no null/infinite values and avoid categorical data
 startTime_cpu = time.process_time() # CPU time
 print(Fore.LIGHTCYAN_EX + f">>> line {lineno()}: START: K-MEANS CLUSTERING >>>")
 
-num_clusters = kmeans_elbow(book_ratings_norm) # this is the number of clusters per the elbow method
-print(Fore.CYAN + f">>> line {lineno()}: number of clusters: {num_clusters} >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
+# console.print(books_ratings.head(5))
+# console.print(books_ratings["034545104X" == books_ratings["isbn"]])
 
-kmeans = KMeans(init="k-means++", n_clusters=num_clusters, n_init=10, max_iter=300, random_state=42).fit(book_ratings_norm)
+kmeans = KMeans(init="k-means++", n_clusters=15, ).fit(books_ratings[["rating"]])
 print(Fore.CYAN + f">>> line {lineno()}: kmeans similarity computed >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
 
-kmeans_dissimilarity = KMeans(init="k-means++", n_clusters=num_clusters, n_init=10, max_iter=300, random_state=42).fit(item_dissimilarity_norm)
-print(Fore.CYAN + f">>> line {lineno()}: kmeans dissimilarity computed >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
+books_ratings["kmeans_cluster"] = kmeans.labels_
+print(Fore.CYAN + f">>> line {lineno()}: kmeans cluster added to books_ratings >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
 
-item_similarity_df["kmeans_label"] = pd.Series(kmeans.labels_)
-item_similarity_norm_df["kmeans_label"] = pd.Series(kmeans.labels_)
-print(Fore.CYAN + f">>> line {lineno()}: kmeans labels added to similarity dataframes >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
+# console.print(books_ratings.head(5))
+# console.print(books_ratings["034545104X" == books_ratings["isbn"]])
 
-item_dissimilarity_df["kmeans_label"] = pd.Series(kmeans_dissimilarity.labels_)
-item_dissimilarity_norm_df["kmeans_label"] = pd.Series(kmeans_dissimilarity.labels_)
-print(Fore.CYAN + f">>> line {lineno()}: kmeans labels added to dissimilarity dataframes >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
+# console.print(books_ratings[books_ratings["kmeans_cluster"] == 0])
+# console.print(books_ratings[books_ratings["kmeans_cluster"] == 1])
+# console.print(books_ratings[books_ratings["kmeans_cluster"] == 2])
+# console.print(books_ratings[books_ratings["kmeans_cluster"] == 3])
+# console.print(books_ratings[books_ratings["kmeans_cluster"] == 4])
+# console.print(books_ratings[books_ratings["kmeans_cluster"] == 5])
+# console.print(books_ratings[books_ratings["kmeans_cluster"] == 6])
+# console.print(books_ratings[books_ratings["kmeans_cluster"] == 7])
+# console.print(books_ratings[books_ratings["kmeans_cluster"] == 8])
+# console.print(books_ratings[books_ratings["kmeans_cluster"] == 9])
+# console.print(books_ratings[books_ratings["kmeans_cluster"] == 10])
+# console.print(books_ratings[books_ratings["kmeans_cluster"] == 11])
 
-_kmeans_sim = get_recommendations(item=ITEM_ISBN, matrix=item_similarity_df, result_type='similar')
-_kmeans_dissim = get_recommendations(item=ITEM_ISBN, matrix=item_dissimilarity_df, result_type='dissimilar')
-
-console.print()
-console.print(_kmeans_sim)
-console.print()
-console.print(_kmeans_dissim)
-console.print()
+# console.print(books_ratings["kmeans_cluster"].value_counts())
+# console.print(books_ratings["kmeans_cluster"].unique())
 
 # compute an average silhouette score for each point
-kmeans_silhouette = silhouette_score(book_ratings_norm, kmeans.labels_)
+# The silhouette score is a measure of how SIMILAR an object is to its own cluster (cohesion) compared to other clusters (separation)
+# The silhouette score ranges from -1 to +1, where a high value indicates that the object is well matched to its own cluster and poorly matched to neighboring clusters. 
+silhouette_scores_rating = silhouette_score(books_ratings[['rating_normalized']], books_ratings['kmeans_cluster'])
+silhouette_scores_rating_count = silhouette_score(books_ratings[['rating_count_normalized']], books_ratings['kmeans_cluster'])
 
-console.print(f"K-means Silhouette Score: {kmeans_silhouette}")
-console.print()
+# console.print(silhouette_scores_rating)
+# console.print(silhouette_scores_rating_count)
+print(Fore.CYAN + f">>> line {lineno()}: k-means silhouette score computed for each point >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
 
 # compute the confidence interval for the k-means model
-kmeans_confidence_interval = kmeans_confidence(book_ratings_norm, num_clusters)
+# confidence score is a metric for the confidence level of the assignment of an entity to a cluster
+# The confidence score ranges from 0 to 1, where a high value indicates that the object is well matched to its own cluster and 
+# poorly matched to neighboring clusters
+kmeans_confidence_interval = kmeans.score(books_ratings[['rating']]) 
 
-console.print(f"K-means Confidence Interval: {kmeans_confidence_interval}")
-console.print()
+# console.print(kmeans_confidence_interval)
+print(Fore.CYAN + f">>> line {lineno()}: confidence scores computed for k-means model >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
+
 
 print(Fore.LIGHTCYAN_EX + f">>> line {lineno()}: END: K-MEANS CLUSTERING >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
-# ### [END] K-Means Clustering
 
 # ### [START] DBSCAN Clustering
 startTime_cpu = time.process_time() # CPU time
 print(Fore.LIGHTCYAN_EX + f">>> line {lineno()}: START: DBSCAN CLUSTERING >>>")
 
-dbscan = DBSCAN(eps=0.5, min_samples=5, ).fit(book_ratings_norm)
+dbscan = DBSCAN(eps=0.5, min_samples=5, ).fit(books_ratings[["rating"]])
 print(Fore.CYAN + f">>> line {lineno()}: dbscan similarity computed >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
 
-dbscan_dissimilarity = DBSCAN(eps=0.5, min_samples=5, ).fit(item_dissimilarity_norm)
-print(Fore.CYAN + f">>> line {lineno()}: dbscan dissimilarity computed >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
+books_ratings["dbscan_cluster"] = dbscan.labels_
+print(Fore.CYAN + f">>> line {lineno()}: dbscan cluster added to books_ratings >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
 
-item_similarity_df.drop(columns=["kmeans_label"], inplace=True)
-item_similarity_norm_df.drop(columns=["kmeans_label"], inplace=True)
-print(Fore.CYAN + f">>> line {lineno()}: similarity dataframes reset: kmeans labels removed >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
+# console.print(books_ratings.head(5))
+# console.print(books_ratings["034545104X" == books_ratings["isbn"]])
 
-item_dissimilarity_df.drop(columns=["kmeans_label"], inplace=True)
-item_dissimilarity_norm_df.drop(columns=["kmeans_label"], inplace=True)
-print(Fore.CYAN + f">>> line {lineno()}: dissimilarity dataframes reset: kmeans labels removed >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
+# console.print(books_ratings[books_ratings["dbscan_cluster"] == 0])
+# console.print(books_ratings[books_ratings["dbscan_cluster"] == 1])
+# console.print(books_ratings[books_ratings["dbscan_cluster"] == 2])
+# console.print(books_ratings[books_ratings["dbscan_cluster"] == 3])
+# console.print(books_ratings[books_ratings["dbscan_cluster"] == 4])
+# console.print(books_ratings[books_ratings["dbscan_cluster"] == 5])
+# console.print(books_ratings[books_ratings["dbscan_cluster"] == 6])
+# console.print(books_ratings[books_ratings["dbscan_cluster"] == 7])
+# console.print(books_ratings[books_ratings["dbscan_cluster"] == 8])
+# console.print(books_ratings[books_ratings["dbscan_cluster"] == 9])
+# console.print(books_ratings[books_ratings["dbscan_cluster"] == 10])
+# console.print(books_ratings[books_ratings["dbscan_cluster"] == 11])
 
-item_similarity_df["dbscan_label"] = pd.Series(dbscan)
-item_similarity_norm_df["dbscan_label"] = pd.Series(dbscan)
-print(Fore.CYAN + f">>> line {lineno()}: dbscan labels added to similarity dataframes >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
-
-item_dissimilarity_df["dbscan_label"] = pd.Series(dbscan_dissimilarity)
-item_dissimilarity_norm_df["dbscan_label"] = pd.Series(dbscan_dissimilarity)
-print(Fore.CYAN + f">>> line {lineno()}: dbscan labels added to dissimilarity dataframes >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
-
-_dbscan_sim = get_recommendations(item=ITEM_ISBN, matrix=item_similarity_df, result_type='similar')
-_dbscan_dissim = get_recommendations(item=ITEM_ISBN, matrix=item_dissimilarity_df, result_type='dissimilar')
-
-console.print()
-console.print(_dbscan_sim)
-console.print()
-console.print(_dbscan_sim.describe())
-console.print()
-console.print(_dbscan_dissim)
-console.print()
-console.print(_dbscan_dissim.describe())
-console.print()
+# console.print(books_ratings["dbscan_cluster"].value_counts())
+# console.print(books_ratings["dbscan_cluster"].unique())
 
 # compute an average silhouette score for each point
-dbscan_silhouette = silhouette_score(books_pivot, dbscan.fit_predict(books_pivot))
-dbscan_silhouette_individual = silhouette_samples(books_pivot, dbscan.fit_predict(books_pivot))
+# The silhouette score is a measure of how SIMILAR an object is to its own cluster (cohesion) compared to other clusters (separation)
+# The silhouette score ranges from -1 to +1, where a high value indicates that the object is well matched to its own cluster and poorly matched to neighboring clusters. 
+silhouette_scores_db_rating = silhouette_score(books_ratings[['rating_normalized']], books_ratings['dbscan_cluster'])
+silhouette_scores_db_rating_count = silhouette_score(books_ratings[['rating_count_normalized']], books_ratings['dbscan_cluster'])
 
-console.print(f"DBSCAN Silhouette Score: {dbscan_silhouette}")
-console.print()
+# console.print(silhouette_scores_db_rating)
+# console.print(silhouette_scores_db_rating_count)
+print(Fore.CYAN + f">>> line {lineno()}: dbscan silhouette score computed for each point >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
 
 # compute the confidence interval for the dbscan model
-dbscan_confidence_interval = np.percentile(dbscan_silhouette_individual, [100 * ALPHA / 2, 100 * (1 - ALPHA / 2)])
+dbscan_confidence_interval = np.percentile(silhouette_scores_db_rating, [100 * ALPHA / 2, 100 * (1 - ALPHA / 2)])
 
-console.print(f"DBSCAN Confidence Interval: {dbscan_confidence_interval}")
-console.print()
+# console.print(f"DBSCAN Confidence Interval: {dbscan_confidence_interval}")
+print(Fore.CYAN + f">>> line {lineno()}: confidence scores computed for dbscan model >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
 
 print(Fore.LIGHTCYAN_EX + f">>> line {lineno()}: END: DBSCAN CLUSTERING >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
 # ### [END] DBSCAN Clustering
+# ### [END] CLUSTERS ###
 
-### [START] Hypothesis Testing #1
+# ### [START] RECOMMENDATION SYSTEM ###    
 startTime_cpu = time.process_time() # CPU time
-print(Fore.LIGHTCYAN_EX + f">>> line {lineno()}: START: HYPOTHESIS TESTING #1 >>>")
-
-# Perform the two sample t-test with equal variances
-h1_t_stat, h1_p_value = stats.ttest_ind(list(_kmeans_sim['similarity_score'][0:9]), list(_dbscan_sim['similarity_score'][0:9]), equal_var=True)
-console.print("t-statistic: ", np.nan_to_num(h1_t_stat))
-console.print("p-value: ", np.nan_to_num(h1_p_value))
-
-print(Fore.CYAN + f">>> line {lineno()}: Hypothesis Testing #1 >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
-console.print()
-
-### [START] Hypothesis Testing #2
-startTime_cpu = time.process_time() # CPU time
-print(Fore.LIGHTCYAN_EX + f">>> line {lineno()}: START: HYPOTHESIS TESTING #2 >>>")
-
-# Calculate the accuracy
-accuracy = calculate_rmse(list(_kmeans_sim['similarity_score'][0:9]), list(_dbscan_sim['similarity_score'][0:9]))
-console.print("rmse: ", np.nan_to_num(accuracy))
-
-print(Fore.CYAN + f">>> line {lineno()}: Hypothesis Testing #2 >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
-console.print()
+# console.print(item_item_collaborative_filtering(books_ratings, ITEM_ISBN, ))
+console.print(recommend_similar_books(books_ratings, ITEM_ISBN, ))
+print(Fore.CYAN + f">>> line {lineno()}: top similar books recommended >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
+# ### [END] RECOMMENDATION SYSTEM ###
 
 executionTime = (time.time() - startTime) * 10**3
 print(Fore.LIGHTGREEN_EX + f"Execution time in milliseconds: {executionTime}ms")
