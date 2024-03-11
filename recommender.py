@@ -7,7 +7,6 @@ import warnings
 
 from colorama import Fore, init
 from rich import console
-from scipy.sparse import csr_matrix
 from sklearn.cluster import DBSCAN, KMeans
 from sklearn.metrics import silhouette_score
 from sklearn.metrics.pairwise import pairwise_distances
@@ -32,7 +31,7 @@ console = console.Console()
 CONFIDENCE_LEVEL = 0.95
 ALPHA = 1 - CONFIDENCE_LEVEL
 ITEM_ISBN = "0671027360"
-PRINT_CLUSTER_LABELS = False
+PRINT_CLUSTER_LABELS = True
 
 
 # ### METHODS ###
@@ -55,7 +54,60 @@ def lineno():
 
 
 def rmse(predictions, targets):
-  return np.sqrt(np.mean((predictions - targets)**2))
+    """
+    Calculate Root Mean Square Error (RMSE) between predictions and targets.
+    
+    Arguments:
+    predictions : list or numpy array
+        Predicted values.
+    targets : list or numpy array
+        Actual observed values.
+    
+    Returns:
+    float
+        Root Mean Square Error (RMSE).
+    """
+    # Ensure predictions and targets have the same length
+    if len(predictions) != len(targets):
+        raise ValueError("Predictions and targets must have the same length.")
+    
+    # Calculate squared differences between predictions and targets
+    squared_errors = [(pred - target) ** 2 for pred, target in zip(predictions, targets)]
+    
+    # Calculate Mean Squared Error (MSE)
+    mse = np.mean(squared_errors)
+    
+    # Calculate Root Mean Square Error (RMSE)
+    rmse = np.sqrt(mse)
+    
+    return rmse
+
+
+def mae(predictions, targets):
+    """
+    Calculate Mean Absolute Error (MAE) between predictions and targets.
+    
+    Arguments:
+    predictions : list or numpy array
+        Predicted values.
+    targets : list or numpy array
+        Actual observed values.
+    
+    Returns:
+    float
+        Mean Absolute Error (MAE).
+    """
+    # Ensure predictions and targets have the same length
+    if len(predictions) != len(targets):
+        raise ValueError("Predictions and targets must have the same length.")
+    
+    # Calculate absolute differences between predictions and targets
+    absolute_errors = [abs(pred - target) for pred, target in zip(predictions, targets)]
+    
+    # Calculate Mean Absolute Error (MAE)
+    mae = sum(absolute_errors) / len(absolute_errors)
+    
+    return mae
 
 
 def recommend_similar_books(books_ratings: pd.DataFrame, isbn: str, n: int = 11, cluster_type: str = "kmeans"):
@@ -91,7 +143,7 @@ def recommend_similar_books(books_ratings: pd.DataFrame, isbn: str, n: int = 11,
     books_in_cluster = books_in_cluster[books_in_cluster['isbn'] != isbn]
 
     # Calculate the similarity between the selected book and each similar book
-    similarities = pairwise_distances(pivot_table.loc[isbn].values.reshape(1, -1), pivot_table.loc[books_in_cluster['isbn']].values)
+    similarities = pairwise_distances(pivot_table.loc[isbn].values.reshape(1, -1), pivot_table.loc[books_in_cluster['isbn']].values, metric="cosine")
     print(Fore.LIGHTGREEN_EX + f">>> >>>>> line {lineno()}: similarity calculated >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
 
     # Attach the similarity scores to the similar_books dataframe
@@ -123,6 +175,10 @@ def recommend_similar_books(books_ratings: pd.DataFrame, isbn: str, n: int = 11,
     # Calculate the RMSE
     rmse_score = rmse(predictions['similarity'], predictions['rating_count_normalized'])
     similar_books['rmse'] = rmse_score
+
+    # Calculate the MAE
+    mae_score = mae(predictions['similarity'], predictions['rating_count_normalized'])
+    similar_books['mae'] = mae_score
 
     print(Fore.LIGHTGREEN_EX + f">>> line {lineno()}: END METHOD: RECOMMEND_SIMILAR_BOOKS >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
 
@@ -222,6 +278,17 @@ book_ratings_count_norm = StandardScaler(with_mean=False).fit_transform(books_ra
 books_ratings['rating_count_normalized'] = book_ratings_count_norm
 print(Fore.CYAN + f">>> line {lineno()}: normalizing data for clustering: completed >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
 
+# Calculate the average rating for each book
+startTime_cpu = time.process_time() # CPU time
+average_rating = books_ratings.groupby("isbn")["rating"].mean()
+books_ratings = books_ratings.merge(average_rating, left_on="isbn", right_index=True, suffixes=["", "_average"])
+print(Fore.CYAN + f">>> line {lineno()}: average rating for each book calculated >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
+
+# Calculate the residual of the rating for each book
+startTime_cpu = time.process_time() # CPU time
+books_ratings["residual"] = books_ratings["rating"] - books_ratings["rating_average"]
+print(Fore.CYAN + f">>> line {lineno()}: residual of the rating for each book calculated >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
+
 # ### [START] CLUSTERS ###
 # ### [START] K-Means Clustering
 # K-Means wants numerical columns, with no null/infinite values and avoid categorical data
@@ -255,6 +322,10 @@ print(Fore.CYAN + f">>> line {lineno()}: confidence interval for the k-means mod
 
 # PRINT the list of the unique cluster labels
 if PRINT_CLUSTER_LABELS:
+    print(f"KMEANS SILHOUETTE SCORES: {kmeans_silhouette_scores_rating}")
+    print(f"KMEANS CONFIDENCE INTERVAL: {kmeans_confidence_interval}")
+    print()
+
     cluster_labels = books_ratings["kmeans_cluster"].unique()
     for label in cluster_labels:
         print(books_ratings[books_ratings["kmeans_cluster"] == label])
@@ -285,6 +356,10 @@ print(Fore.CYAN + f">>> line {lineno()}: confidence scores computed for dbscan m
 
 # PRINT the list of the unique cluster labels
 if PRINT_CLUSTER_LABELS:
+    print(f"DBSCAN SILHOUETTE SCORES: {dbscan_silhouette_scores_rating}")
+    print(f"DBSCAN CONFIDENCE INTERVAL: {dbscan_confidence_interval}")
+    print()
+
     cluster_labels = books_ratings["dbscan_cluster"].unique()
     for label in cluster_labels:
         print(books_ratings[books_ratings["dbscan_cluster"] == label])
