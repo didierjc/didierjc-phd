@@ -7,10 +7,12 @@ import warnings
 
 from colorama import Fore, init
 from rich import console
+from scipy.stats import ttest_ind, ttest_rel
 from sklearn.cluster import DBSCAN, KMeans
 from sklearn.metrics import silhouette_score
 from sklearn.metrics.pairwise import pairwise_distances
 from sklearn.preprocessing import StandardScaler
+
 
 # clear the output
 os.system('cls') # for windows
@@ -108,6 +110,25 @@ def mae(predictions, targets):
     mae = sum(absolute_errors) / len(absolute_errors)
     
     return mae
+
+
+def bonferroni_correction(p_values, num_tests):
+    """
+    Apply Bonferroni correction to p-values.
+
+    Arguments:
+    p_values : list or numpy array
+        List of p-values.
+    num_tests : int
+        Number of tests.
+
+    Returns:
+    numpy array
+        Bonferroni corrected p-values.
+    """
+    corrected_p_values = np.minimum(p_values * num_tests, 1.0)
+
+    return corrected_p_values
 
 
 def recommend_similar_books(books_ratings: pd.DataFrame, isbn: str, n: int = 11, cluster_type: str = "kmeans"):
@@ -367,6 +388,27 @@ if PRINT_CLUSTER_LABELS:
 print(Fore.LIGHTCYAN_EX + f">>> line {lineno()}: END: DBSCAN CLUSTERING >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
 # ### [END] DBSCAN Clustering
 # ### [END] CLUSTERS ###
+
+# ### [START] Performing tests
+# Perform t-tests between K-Means and DBSCAN silhouette scores
+startTime_cpu = time.process_time() # CPU time
+print(Fore.LIGHTCYAN_EX + f">>> line {lineno()}: START: PERFORMING TESTS >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
+
+kmeans_dbscan_ttest = ttest_rel(kmeans_silhouette_scores_rating, dbscan_silhouette_scores_rating)
+print(Fore.LIGHTYELLOW_EX + f">>> kmeans_dbscan_ttest: {kmeans_dbscan_ttest}")
+
+t_stat, p_value = ttest_ind([kmeans_silhouette_scores_rating, kmeans_silhouette_scores_rating_count],
+                            [dbscan_silhouette_scores_rating, dbscan_silhouette_scores_rating_count])
+print(Fore.LIGHTYELLOW_EX + f">>> t_stat: {t_stat} , p_value: {p_value}")
+
+# Apply Bonferroni test
+p_values = np.array([p_value])
+corrected_p_values = bonferroni_correction(p_values, 5)  # Number of tests is 2
+print(Fore.LIGHTYELLOW_EX + f">>> p_values: {p_values} , Bonferroni corrected p-values: {corrected_p_values}")
+# ### [END] BONFERRONI TEST ###
+
+print(Fore.CYAN + f">>> line {lineno()}: t-tests performed >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
+# ### [END] Performing tests
 
 # ### [START] RECOMMENDATION SYSTEM ###  
 startTime_cpu = time.process_time() # CPU time
