@@ -344,8 +344,7 @@ print(Fore.CYAN + f">>> line {lineno()}: confidence interval for the k-means mod
 # PRINT the list of the unique cluster labels
 if PRINT_CLUSTER_LABELS:
     print(f"KMEANS SILHOUETTE SCORES: {kmeans_silhouette_scores_rating}")
-    print(f"KMEANS CONFIDENCE INTERVAL: {kmeans_confidence_interval}")
-    print()
+    print(f"KMEANS CONFIDENCE INTERVAL: {kmeans_confidence_interval}\n")
 
     cluster_labels = books_ratings["kmeans_cluster"].unique()
     for label in cluster_labels:
@@ -378,8 +377,7 @@ print(Fore.CYAN + f">>> line {lineno()}: confidence scores computed for dbscan m
 # PRINT the list of the unique cluster labels
 if PRINT_CLUSTER_LABELS:
     print(f"DBSCAN SILHOUETTE SCORES: {dbscan_silhouette_scores_rating}")
-    print(f"DBSCAN CONFIDENCE INTERVAL: {dbscan_confidence_interval}")
-    print()
+    print(f"DBSCAN CONFIDENCE INTERVAL: {dbscan_confidence_interval}\n")
 
     cluster_labels = books_ratings["dbscan_cluster"].unique()
     for label in cluster_labels:
