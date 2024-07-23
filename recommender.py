@@ -394,16 +394,21 @@ print(Fore.LIGHTCYAN_EX + f">>> line {lineno()}: END: DBSCAN CLUSTERING >>> {(ti
 startTime_cpu = time.process_time() # CPU time
 print(Fore.LIGHTCYAN_EX + f">>> line {lineno()}: START: PERFORMING TESTS >>> {(time.process_time() - startTime_cpu) * 10**3}ms")
 
+print(Fore.LIGHTYELLOW_EX + f">>> kmeans_silhouette_scores_rating: {kmeans_silhouette_scores_rating} >>> dbscan_silhouette_scores_rating:{dbscan_silhouette_scores_rating}")
+print(Fore.LIGHTYELLOW_EX + ">>> ttest_rel(kmeans_silhouette_scores_rating, dbscan_silhouette_scores_rating)")
 kmeans_dbscan_ttest = ttest_rel(kmeans_silhouette_scores_rating, dbscan_silhouette_scores_rating)
-print(Fore.LIGHTYELLOW_EX + f">>> kmeans_dbscan_ttest: {kmeans_dbscan_ttest}")
+print(Fore.LIGHTYELLOW_EX + f">>> kmeans_dbscan_ttest: {kmeans_dbscan_ttest}\n")
 
+print(Fore.LIGHTYELLOW_EX + f">>> kmeans_silhouette_scores_rating: {kmeans_silhouette_scores_rating} >>> kmeans_silhouette_scores_rating_count:{kmeans_silhouette_scores_rating_count}")
+print(Fore.LIGHTYELLOW_EX + f">>> dbscan_silhouette_scores_rating: {dbscan_silhouette_scores_rating} >>> dbscan_silhouette_scores_rating_count:{dbscan_silhouette_scores_rating_count}")
+print(Fore.LIGHTYELLOW_EX + ">>> ttest_ind([kmeans_silhouette_scores_rating, kmeans_silhouette_scores_rating_count],[dbscan_silhouette_scores_rating, dbscan_silhouette_scores_rating_count])")
 t_stat, p_value = ttest_ind([kmeans_silhouette_scores_rating, kmeans_silhouette_scores_rating_count],
                             [dbscan_silhouette_scores_rating, dbscan_silhouette_scores_rating_count])
-print(Fore.LIGHTYELLOW_EX + f">>> t_stat: {t_stat} , p_value: {p_value}")
+print(Fore.LIGHTYELLOW_EX + f">>> t_stat: {t_stat} , p_value: {p_value}\n")
 
 # Apply Bonferroni test
 p_values = np.array([p_value])
-corrected_p_values = bonferroni_correction(p_values, 5)  # Number of tests is 2
+corrected_p_values = bonferroni_correction(p_values, 5)
 print(Fore.LIGHTYELLOW_EX + f">>> p_values: {p_values} , Bonferroni corrected p-values: {corrected_p_values}")
 # ### [END] BONFERRONI TEST ###
 
